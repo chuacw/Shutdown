@@ -220,7 +220,7 @@ begin
           WriteLn(Format('%sed', [SuccessStr[WNetCancelConnection2(LNetResource.lpRemoteName, 0, True)=NO_ERROR]]));
         end;
 
+      if DebugHook <> 0 then
+        ReadLn;
     end;
-  if DebugHook <> 0 then
-    ReadLn;
 end.
