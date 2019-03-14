@@ -1,5 +1,4 @@
 program shutdown;
-
 {$APPTYPE CONSOLE}
 
 uses
@@ -7,7 +6,8 @@ uses
   System.SysUtils,
   Winapi.Messages;
 
-function SetCurrentPrivilege(const SystemName, Privilege: string; EnablePrivilege: Bool): Bool;
+function SetCurrentPrivilege(const SystemName, Privilege: string;
+  EnablePrivilege: LongBool): LongBool;
 var
   LToken: THandle;
   luid: TLargeInteger;
@@ -60,7 +60,7 @@ begin
     end;
 end;
 
-function NameIsLocal(const AMachineName: string): Boolean;
+function NameIsLocal(const AMachineName: string): LongBool;
 var
   LSystemName, LMachineName: string;
   I: Integer;
@@ -75,36 +75,174 @@ begin
   Result := CompareText(LMachineName, LSystemName) = 0;
 end;
 
-
-const
-  SuccessStr: array[Boolean] of string=('Fail', 'Succeed');
-  SE_REMOTE_SHUTDOWN_NAME = 'SeRemoteShutdownPrivilege';
-  SE_SHUTDOWN_NAME = 'SeShutdownPrivilege';
-var
-  LReboot, LForced: Bool;
-  LMessage, LMachineName: string;
-  LTimeout: DWORD;
-  LParam, LUserPassword, LUserName: string;
-  LIsMachineLocal, AbortShutdown, Connected: Boolean;
-  LNetResource: TNetResource;
-  LAbortStatus, LShutdownStatus: Boolean;
-  I, LParamCount: Integer;
-  LShutdownPrivilege: string;
+procedure ShowHelp;
 begin
-  WriteLn('Remote Shutdown v1.00 by chuacw (c) 2001');
-
   WriteLn('Usage: shutdown [params] MACHINENAME');
   WriteLn('  -a (abort current shutdown)');
   WriteLn('  -f (force apps to close on shutdown)');
+  WriteLn('  -?,h (Show help)');
   WriteLn('  -m "Message"');
   WriteLn('  -r (reboot after shutdown)');
   WriteLn('  -u username');
   WriteLn('  -p password ');
   WriteLn('  -t timeout (timeout in seconds)');
   WriteLn;
-  WriteLn('MACHINENAME: LOCAL or \\hostname');
-  WriteLn('  if MACHINENAME is empty, it implies the local machine');
+  WriteLn('MACHINENAME: LOCAL or \\remotehostname');
+  WriteLn('  if MACHINENAME is empty or LOCAL, it implies the local machine');
 
+  WriteLn;
+end;
+
+procedure ShutdownProc(const AMachineName, AUserName, APassword, AMessage: string;
+  ATimeout: DWORD; AAbortShutdown, AForce, AReboot: LongBool);
+const
+  SuccessStr: array[Boolean] of string=('Fail', 'Succeed');
+  SE_REMOTE_SHUTDOWN_NAME = 'SeRemoteShutdownPrivilege';
+  SE_SHUTDOWN_NAME = 'SeShutdownPrivilege';
+var
+  LConnected, LIsMachineLocal: LongBool;
+  LMachineName, LShutdownPrivilege: string;
+  LNetResource: TNetResource;
+  LAbortStatus, LShutdownStatus: LongBool;
+begin
+  LMachineName := AMachineName;
+  LIsMachineLocal := NameIsLocal(LMachineName);
+
+  if LIsMachineLocal then
+    begin
+      LMachineName := EmptyStr;
+      LShutdownPrivilege := SE_SHUTDOWN_NAME;
+    end else
+    begin
+      Write(Format('Connecting to %s...: ', [LMachineName]));
+      LNetResource.dwType := RESOURCETYPE_ANY;
+      LNetResource.lpRemoteName := PChar(LMachineName);
+      LNetResource.lpLocalName := nil;
+      LNetResource.lpProvider := nil;
+      LConnected := WNetAddConnection2(LNetResource, PChar(APassword),
+        PChar(AUserName), CONNECT_INTERACTIVE) = NO_ERROR;
+      WriteLn(Format('%sed.', [SuccessStr[LConnected]]));
+      if not LConnected then
+        begin
+          WriteLn(SysErrorMessage(GetLastError));
+          Exit;
+        end;
+      LShutdownPrivilege := SE_REMOTE_SHUTDOWN_NAME;
+    end;
+
+  if not SetCurrentPrivilege(LMachineName, LShutdownPrivilege, True) then
+    WriteLn('Unable to obtain shutdown privilege due to: ', SysErrorMessage(GetLastError));
+
+  if AAbortShutdown then
+    begin
+      Write('Abort shutdown: ');
+      LAbortStatus := AbortSystemShutdown(PChar(LMachineName));
+      if LAbortStatus then
+        begin
+          WriteLn(Format('%sed.', [SuccessStr[LAbortStatus]]));
+        end else
+        begin
+          Write(SuccessStr[LAbortStatus], 'ed. ');
+          WriteLn(SysErrorMessage(GetLastError), '.');
+        end;
+    end else
+    begin
+      Write(Format('Shutting down machine %s...: ', [LMachineName]));
+      LShutdownStatus := InitiateSystemShutdown(PChar(LMachineName),
+        PChar(AMessage), ATimeout, AForce, AReboot);
+      if LShutdownStatus then
+        begin
+          WriteLn(Format('%sed.', [SuccessStr[LShutdownStatus]]));
+        end else
+        begin
+          Write(SuccessStr[LShutdownStatus], 'ed. ');
+          WriteLn(SysErrorMessage(GetLastError), '.');
+        end;
+    end;
+
+  SetCurrentPrivilege(LMachineName, LShutdownPrivilege, False);
+  if not LIsMachineLocal then
+    begin
+      Write(Format('Disconnecting from %s...: ', [LMachineName]));
+      WriteLn(Format('%sed', [
+        SuccessStr[WNetCancelConnection2(LNetResource.lpRemoteName, 0,
+          True)=NO_ERROR]]));
+    end;
+end;
+
+function ParseCmdLine(var OMachineName, OUserName, OPassword, OMessage: string;
+  var OTimeout: DWORD; var OAbortShutdown, OForced, OReboot: LongBool): LongBool;
+var
+  I, LParamCount: Integer;
+  LParam: string;
+begin
+  Result := ParamCount>=1;
+  if Result then
+    begin
+      I := 1; LParamCount := ParamCount;
+      while I <= LParamCount do
+        begin
+          LParam := ParamStr(I);
+          if (Length(LParam) >= 2) and ((LParam[1] = '-') or (LParam[1] = '/')) then
+            begin
+              case UpCase(LParam[2]) of
+                '?', 'H': begin
+                  ShowHelp;
+                  Exit(False);
+                end;
+                'A': begin // abort
+                  OAbortShutdown := True;
+                  Inc(I);
+                end;
+                'F': begin
+                  OForced := True;
+                  Inc(I);
+                end;
+                'M': begin
+                  OMessage := ParamStr(I+1);
+                  Inc(I, 2);
+                end;
+                'P': begin
+                  LParam := ParamStr(I+1);
+                  OPassword := LParam;
+                  Inc(I, 2);
+                end;
+                'R': begin
+                  OReboot := True;
+                  Inc(I);
+                end;
+                'T': begin
+                  LParam := ParamStr(I+1);
+                  OTimeout := StrToIntDef(LParam, 600);
+                  if (OTimeout <> 0) and (OMessage = '') then
+                    OMessage := Format('Shutting down in %d secs.', [OTimeout]);
+                  Inc(I, 2);
+                end;
+                'U': begin
+                  LParam := ParamStr(I+1);
+                  OUserName := LParam;
+                  Inc(I, 2);
+                end;
+              else
+                OMachineName := LParam;
+                Inc(I);
+              end;
+            end else
+            begin
+              OMachineName := LParam;
+              Inc(I);
+            end;
+        end;
+    end;
+end;
+
+procedure MainApp;
+var
+  LAbortShutdown, LReboot, LForced: LongBool;
+  LMessage, LMachineName, LUserPassword, LUserName: string;
+  LTimeout: DWORD;
+begin
+  WriteLn('Remote Shutdown v1.10 by chuacw (c) 2001, 2019');
   WriteLn;
 
   LTimeout := 600; // Default timeout of 600s
@@ -114,113 +252,34 @@ begin
   LMessage := EmptyStr;
   LUserPassword := EmptyStr;
   LUserName := EmptyStr;
-  AbortShutdown := False;
-  if ParamCount>=1 then
+  LAbortShutdown := False;
+
+  if ParamCount = 0 then
+    Exit;
+
+  if ParseCmdLine(LMachineName, LUserName, LUserPassword, LMessage, LTimeout,
+    LAbortShutdown, LForced, LReboot) then
     begin
-      I := 1; LParamCount := ParamCount;
-      while I <= LParamCount do
-        begin
-          LParam := ParamStr(I);
-          if (Length(LParam) >= 2) and ((LParam[1]='-') or (LParam[1]='/')) then
-            begin
-              case UpCase(LParam[2]) of
-                'A': begin // abort
-                  AbortShutdown := True;
-                  Inc(I);
-                end;
-                'F': begin
-                  LForced := True;
-                  Inc(I);
-                end;
-                'M': begin
-                  LMessage := ParamStr(I+1);
-                  Inc(I, 2);
-                end;
-                'P': begin
-                  LParam := ParamStr(I+1);
-                  LUserPassword := LParam;
-                  Inc(I, 2);
-                end;
-                'R': begin
-                  LReboot := True;
-                  Inc(I);
-                end;
-                'T': begin
-                  LParam := ParamStr(I+1);
-                  LTimeout := StrToIntDef(LParam, 600);
-                  Inc(I, 2);
-                end;
-                'U': begin
-                  LParam := ParamStr(I+1);
-                  LUserName := LParam;
-                  Inc(I, 2);
-                end;
-              else
-                LMachineName := LParam;
-                Inc(I);
-              end;
-            end else
-            begin
-              LMachineName := LParam;
-              Inc(I);
-            end;
-        end;
-
-      LIsMachineLocal := NameIsLocal(LMachineName);
-
-      if LIsMachineLocal then
-        begin
-          LMachineName := EmptyStr;
-          LShutdownPrivilege := SE_SHUTDOWN_NAME;
-        end else
-        begin
-          Write(Format('Connecting to %s...: ', [LMachineName]));
-          LNetResource.dwType := RESOURCETYPE_ANY;
-          LNetResource.lpRemoteName := PChar(LMachineName);
-          LNetResource.lpLocalName := nil;
-          LNetResource.lpProvider := nil;
-          Connected := WNetAddConnection2(LNetResource, PChar(LUserPassword), PChar(LUserName), 0) = NO_ERROR;
-          WriteLn(Format('%sed', [SuccessStr[Connected]]));
-          LShutdownPrivilege := SE_REMOTE_SHUTDOWN_NAME;
-        end;
-
-      if not SetCurrentPrivilege(LMachineName, LShutdownPrivilege, True) then
-        WriteLn('Unable to obtain shutdown privilege due to: ', SysErrorMessage(GetLastError));
-
-      if AbortShutdown then
-        begin
-          Write('Abort shutdown: ');
-             LAbortStatus := AbortSystemShutdown(PChar(LMachineName));
-          if LAbortStatus then
-            begin
-              WriteLn(Format('%sed.', [SuccessStr[LAbortStatus]]));
-            end else
-            begin
-              Write(SuccessStr[LAbortStatus], 'ed. ');
-              WriteLn(SysErrorMessage(GetLastError));
-            end;
-        end else
-        begin
-          Write(Format('Shutting down machine %s...: ', [LMachineName]));
-          LShutdownStatus := InitiateSystemShutdown(PChar(LMachineName), PChar(LMessage), LTimeout, LForced, LReboot);
-          if LShutdownStatus then
-            begin
-              WriteLn(Format('%sed.', [SuccessStr[LShutdownStatus]]));
-            end else
-            begin
-              Write(SuccessStr[LShutdownStatus], 'ed. ');
-              WriteLn(SysErrorMessage(GetLastError));
-            end;
-        end;
-
-      SetCurrentPrivilege(LMachineName, LShutdownPrivilege, False);
-      if not LIsMachineLocal then
-        begin
-          Write(Format('Disconnecting from %s...: ', [LMachineName]));
-          WriteLn(Format('%sed', [SuccessStr[WNetCancelConnection2(LNetResource.lpRemoteName, 0, True)=NO_ERROR]]));
-        end;
-
+      ShutdownProc(LMachineName, LUserName, LUserPassword, LMessage, LTimeout,
+        LAbortShutdown, LForced, LReboot);
+{$WARN SYMBOL_PLATFORM OFF}
       if DebugHook <> 0 then
         ReadLn;
     end;
+end;
+
+// Independent test
+procedure Test;
+var
+  MachineName, UserName, Password: string;
+begin
+  UserName := ''; // ...
+  Password := ''; // ...
+  MachineName := '\\....'; // IP address or hostname
+  ShutdownProc(MachineName, UserName, Password, 'Shutting down in 10s',
+    10, False, True, False);
+end;
+
+begin
+  MainApp;
 end.
