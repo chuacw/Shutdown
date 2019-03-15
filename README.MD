@@ -2,17 +2,16 @@ Introduction
 ============
 This is an application to shutdown either a local or remote Windows machine.
 
-Usage: shutdown [params] MACHINENAME
+Usage: shutdown [[params] MACHINENAME]
 
- \-a (abort current shutdown)
- \-f (force apps to close on shutdown)
- \-?,h (Show help)
- \-m "Message"
- \-r (reboot after shutdown)
- \-u username
- \-p password 
- \-t timeout (timeout in seconds)
-  
+&nbsp;  -a (abort current shutdown)  
+&nbsp;  -f (force apps to close on shutdown)  
+&nbsp;  -?,h (Show help)  
+&nbsp;  -m "Message"  
+&nbsp;  -r (reboot after shutdown)  
+&nbsp;  -u username  
+&nbsp;  -p password  
+&nbsp;  -t timeout (in seconds before shutdown commences)  
 
 MACHINENAME: LOCAL or \\remotehostname
   if MACHINENAME is empty or LOCAL, it implies the local machine
@@ -25,4 +24,3 @@ Examples
  - shutdown -u "Chee Wee" -p 1234 \\\\10.1.1.1
  - shutdown -a
  - shutdown -t 5 -r -f
-
