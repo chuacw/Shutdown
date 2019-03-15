@@ -19,8 +19,8 @@ Examples
  - shutdown /?
  - shutdown -?
  - shutdown -t 5 -m "Shutting down in 5s"
- - shutdown -u "Chee Wee" -p 1234 \\HOST1
- - shutdown -u "Chee Wee" -p 1234 \\10.1.1.1
+ - shutdown -u "Chee Wee" -p 1234 \\\\HOST1
+ - shutdown -u "Chee Wee" -p 1234 \\\\10.1.1.1
  - shutdown -a
  - shutdown -t 5 -r -f
 
