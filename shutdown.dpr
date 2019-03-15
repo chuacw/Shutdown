@@ -4,7 +4,8 @@ program shutdown;
 uses
   Winapi.Windows,
   System.SysUtils,
-  Winapi.Messages;
+  Winapi.Messages,
+  Winapi.PrivilegeConsts in 'Winapi.PrivilegeConsts.pas';
 
 function SetCurrentPrivilege(const SystemName, Privilege: string;
   EnablePrivilege: LongBool): LongBool;
@@ -60,6 +61,8 @@ begin
     end;
 end;
 
+///<summary>Checks if AMachineName refers to the local machine and returns true if so.</summary>
+///<param name="AMachineName">Name to check</param>
 function NameIsLocal(const AMachineName: string): LongBool;
 var
   LSystemName, LMachineName: string;
@@ -93,12 +96,19 @@ begin
   WriteLn;
 end;
 
+///<summary>Shuts down the designated machine, or aborts a shutdown.</summary>
+///<param name="AMachineName">The machine to shutdown, or abort shutdown.</param>
+///<param name="AUserName">Username to connect to the machine.</param>
+///<param name="APassword">Password to use to connect to the machine</param>
+///<param name="AMessage">Message to display when shutting down.</param>
+///<param name="ATimeout">Amount of time in seconds to wait before shutting down.</param>
+///<param name="AAbortShutdown">If true, aborts the shutdown on the designated machine.</param>
+///<param name="AForce">If true, force apps to close on shutdown.</param>
+///<param name="AReboot">If true, reboots after shutdown is completed.</param>
 procedure ShutdownProc(const AMachineName, AUserName, APassword, AMessage: string;
   ATimeout: DWORD; AAbortShutdown, AForce, AReboot: LongBool);
 const
   SuccessStr: array[Boolean] of string=('Fail', 'Succeed');
-  SE_REMOTE_SHUTDOWN_NAME = 'SeRemoteShutdownPrivilege';
-  SE_SHUTDOWN_NAME = 'SeShutdownPrivilege';
 var
   LConnected, LIsMachineLocal: LongBool;
   LMachineName, LShutdownPrivilege: string;
